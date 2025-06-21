@@ -1,0 +1,19 @@
+# 認証情報と環境変数
+credentials.json
+service_account_key.json
+.env
+
+# 設定ファイル (念のため)
+config.ini
+
+# ビルド成果物とキャッシュ
+/dist/
+/build/
+__pycache__/
+*.pyc
+*.pkg
+*.exe
+
+# その他OSファイルなど
+.DS_Store
+error.log
