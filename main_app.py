@@ -1,5 +1,5 @@
 # ==============================================================================
-# file: main_app.py (言語メニュー修正版)
+# file: main_app.py (プロンプト・速度改善版 v1.0.4)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font, scrolledtext, simpledialog
@@ -16,6 +16,7 @@ from threading import Thread, Event
 import traceback
 import subprocess
 from PIL import Image, ImageTk
+import shutil
 
 # 外部ファイルをインポート
 from language_manager import LanguageManager
@@ -23,7 +24,7 @@ from google_drive_handler import GoogleDriveHandler, GoogleAIApiHandler
 from file_system_handler import FileSystemHandler
 from app_view import AppView
 from app_logic import AppLogic
-from utils import resource_path
+from utils import resource_path, get_config_dir
 
 class TextRedirector:
     def __init__(self, widget, tag="stdout"):
@@ -45,30 +46,72 @@ class TextRedirector:
     def flush(self): pass
 
 class FileRenamerApp(TkinterDnD.Tk):
-    CURRENT_VERSION = "1.0.0"
+    CURRENT_VERSION = "1.0.4" # バージョンアップ
 
     def __init__(self):
         super().__init__()
         self._set_app_icon()
         self.withdraw()
 
-        self.config_filepath = "config.ini"
-        self.prompts_filepath = "rename_prompts.txt"
+        self.config_dir = get_config_dir("TagClericAI")
+        self.config_filepath = os.path.join(self.config_dir, "config.ini")
+        self.prompts_filepath = os.path.join(self.config_dir, "rename_prompts.txt")
+
+        self.setup_variables()
+        self._initialize_user_files()
+
+        lang_code = self.load_language_setting()
+        self.lang_manager = LanguageManager(lang_code)
         
+        self._update_language_dependent_vars()
+
         self._load_app_config()
-        self.lang_manager = LanguageManager(self.load_language_setting())
-        
+        self.load_config()
+
         self.cancel_requested = Event()
         self.is_processing = False
-
         self.style = ttk.Style(self)
         self.style.theme_use('clam')
         self._configure_styles()
         
-        self.setup_variables()
-        self.load_config()
         self.initialize_main_app()
         self.deiconify()
+
+    def _create_default_config(self):
+        print("config.ini が見つからないため、デフォルト値で新規作成します。")
+        config = configparser.ConfigParser()
+        config['Settings'] = {
+            'GeminiApiKey': '',
+            'GeminiModel': self.gemini_model_var.get(),
+            'Language': 'ja'
+        }
+        config['Links'] = {
+            'UpdateInfoURL': "https://gist.githubusercontent.com/nicobtan/724c59750c93cf7a296117e345a2f0c5/raw/version.json",
+            'DonationURL': "https://portfoliopage-25077.web.app/donation.html",
+            'PromptIdeaURL': "https://note.com/mate_inc/n/n31b96d35a5c6",
+            'AboutURL': "https://github.com/",
+            'ApiKeyURL': "https://ai.google.dev/gemini-api/docs/api-key?hl=ja"
+        }
+        try:
+            with open(self.config_filepath, 'w', encoding='utf-8') as configfile:
+                config.write(configfile)
+            print(f"デフォルトのconfig.iniを '{self.config_filepath}' に作成しました。")
+        except Exception as e:
+            print(f"config.ini の作成に失敗しました: {e}")
+
+    def _initialize_user_files(self):
+        if not os.path.exists(self.config_filepath):
+            try:
+                self._create_default_config()
+            except Exception as e:
+                print(f"config.ini の初期化に失敗しました: {e}")
+
+        if not os.path.exists(self.prompts_filepath):
+            try:
+                self._save_defaults_to_prompt_file()
+                print(f"デフォルトのプロンプトを '{self.prompts_filepath}' に作成しました。")
+            except Exception as e:
+                print(f"rename_prompts.txt の初期化に失敗しました: {e}")
 
     def _set_app_icon(self):
         try:
@@ -140,7 +183,6 @@ class FileRenamerApp(TkinterDnD.Tk):
         lang_menu = tk.Menu(settings_menu, tearoff=0)
         settings_menu.add_cascade(label=self.lang_manager.get("language_menu"), menu=lang_menu)
         
-        # --- ★ここから修正：ラジオボタン形式でメニューを作成 ---
         lang_menu.add_radiobutton(
             label="日本語", 
             variable=self.selected_language_var, 
@@ -153,7 +195,6 @@ class FileRenamerApp(TkinterDnD.Tk):
             value='en', 
             command=lambda: self.switch_language('en')
         )
-        # --- ★修正ここまで ---
 
         settings_menu.add_separator()
         settings_menu.add_command(label=self.lang_manager.get("exit_menu"), command=self.on_closing)
@@ -162,9 +203,9 @@ class FileRenamerApp(TkinterDnD.Tk):
         if self.lang_manager.language_code == lang_code:
             return
         
-        if messagebox.askokcancel("Language Change", "The application needs to restart to apply the language change. Continue?"):
+        if messagebox.askokcancel(self.lang_manager.get("lang_change_title"), self.lang_manager.get("lang_change_message")):
             self.save_language_setting(lang_code)
-            #self.restart_app()
+            self.restart_app()
 
     def restart_app(self):
         self.save_config()
@@ -194,9 +235,12 @@ class FileRenamerApp(TkinterDnD.Tk):
 
     def setup_variables(self):
         self.THUMBNAIL_SIZE = (180, 180)
+        # --- ★修正: gemini-2.0-flash-lite をリストに追加し、デフォルトに設定 ---
         self.GEMINI_MODELS = [
-            "gemini-2.0-flash-lite", "gemini-1.5-flash-latest", 
-            "gemini-1.5-pro-latest", "gemini-pro"
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash-latest", 
+            "gemini-1.5-pro-latest", 
+            "gemini-pro"
         ]
         self.gemini_model_var = tk.StringVar(value=self.GEMINI_MODELS[0])
         self.add_date_var = tk.BooleanVar(value=True)
@@ -206,22 +250,36 @@ class FileRenamerApp(TkinterDnD.Tk):
         self.ai_min_score_var = tk.DoubleVar(value=0.7)
         self.ai_max_keywords_var = tk.IntVar(value=3)
         self.ai_fallback_name_var = tk.StringVar(value="AI_Unknown")
-        self.folder_path_display_var = tk.StringVar(value=self.lang_manager.get("dnd_text"))
+        self.folder_path_display_var = tk.StringVar(value="ここにフォルダをドラッグ＆ドロップ...")
         self.file_types_var = tk.StringVar(value=".jpg,.png,.jpeg,.gif,.bmp,.webp,.mp4,.mov,.avi")
-        self.language_mode_var = tk.StringVar(value=self.lang_manager.get("lang_ja"))
+        self.language_mode_var = tk.StringVar(value="日本語")
         self.gemini_api_key_var = tk.StringVar(value="")
-        self.PROMPT_TEMPLATES = { "人物の特徴を詳しく": "...", "背景を重視して": "...", "アーティスティックな表現で": "...", "カスタム": "" }
+        self.PROMPT_TEMPLATES = {
+            "人物の特徴を詳しく": "写っている人物の見た目、服装、表情、ポーズなどを詳細に表現するようなファイル名を生成してください。",
+            "背景を重視して": "写っている場所や背景の雰囲気、時間帯が伝わるようなファイル名を生成してください。",
+            "アーティスティックな表現で": "構図や光の使い方、色彩など、写真や絵画としての芸術性を表現するような詩的なファイル名を生成してください。",
+            "人物の特徴を詳しく一節で": "写っている人物の見た目、服装、表情、ポーズなどを詳細に表現するようなファイル名を一節で生成してください。",
+            "人物の特徴を詳しく一文で": "写っている人物の見た目、服装、表情、ポーズなどを詳細に表現するようなファイル名を一文で生成してください。",
+            "カスタム": "画像の内容を要約し、ユニークで分かりやすいファイル名を生成してください。"
+        }
         self.prompt_template_var = None
-        # --- ★ここに追加：言語メニュー用の変数 ---
-        self.selected_language_var = tk.StringVar(value=self.lang_manager.language_code)
-        # -----------------------------------
+        self.selected_language_var = tk.StringVar(value='ja')
+
+    def _update_language_dependent_vars(self):
+        self.folder_path_display_var.set(self.lang_manager.get("dnd_text"))
+        self.language_mode_var.set(self.lang_manager.get("lang_ja"))
 
     def load_language_setting(self):
         config = configparser.ConfigParser()
+        lang = 'ja'
         if os.path.exists(self.config_filepath):
-            config.read(self.config_filepath, encoding='utf-8')
-            return config.get('Settings', 'Language', fallback='ja')
-        return 'ja'
+            try:
+                config.read(self.config_filepath, encoding='utf-8')
+                lang = config.get('Settings', 'Language', fallback='ja')
+            except Exception as e:
+                print(f"言語設定の読み込みに失敗しました: {e}")
+        self.selected_language_var.set(lang)
+        return lang
 
     def save_language_setting(self, lang_code):
         config = configparser.ConfigParser()
@@ -235,7 +293,8 @@ class FileRenamerApp(TkinterDnD.Tk):
 
     def load_config(self):
         config = configparser.ConfigParser()
-        if os.path.exists(self.config_filepath): config.read(self.config_filepath, encoding='utf-8')
+        if os.path.exists(self.config_filepath): 
+            config.read(self.config_filepath, encoding='utf-8')
         if config.has_section('Settings'):
             self.gemini_api_key_var.set(config.get('Settings', 'GeminiApiKey', fallback=''))
             self.gemini_model_var.set(config.get('Settings', 'GeminiModel', fallback=self.GEMINI_MODELS[0]))
@@ -252,13 +311,13 @@ class FileRenamerApp(TkinterDnD.Tk):
         try:
             with open(self.config_filepath, 'w', encoding='utf-8') as configfile:
                 config.write(configfile)
-            print("設定をconfig.iniに保存しました。")
+            print(f"設定を'{self.config_filepath}'に保存しました。")
         except IOError as e:
             print(f"設定ファイルの保存に失敗しました: {e}")
 
     def on_closing(self):
         if self.is_processing:
-            if messagebox.askyesno("Confirm", "Processing is ongoing. Are you sure you want to exit?"):
+            if messagebox.askyesno(self.lang_manager.get("confirm_exit_title"), self.lang_manager.get("confirm_exit_message")):
                 self.cancel_requested.set()
                 self.save_config()
                 self.destroy()
@@ -320,26 +379,29 @@ class FileRenamerApp(TkinterDnD.Tk):
             if os.path.exists(self.prompts_filepath):
                 with open(self.prompts_filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
-                    self.PROMPT_TEMPLATES = json.loads(content) if content.strip() else {}
-            else: self._save_defaults_to_prompt_file()
+                    if content.strip():
+                        self.PROMPT_TEMPLATES = json.loads(content)
         except (json.JSONDecodeError, IOError) as e:
             messagebox.showwarning("Prompt Load Error", f"Failed to load '{self.prompts_filepath}'. Using default settings.\nError: {e}")
+            self._save_defaults_to_prompt_file()
+        
         if "カスタム" not in self.PROMPT_TEMPLATES and "Custom" not in self.PROMPT_TEMPLATES: 
-            self.PROMPT_TEMPLATES["カスタム"] = ""
+            self.PROMPT_TEMPLATES["カスタム"] = "画像の内容を要約し、ユニークで分かりやすいファイル名を生成してください。"
+        
         initial_selection = list(self.PROMPT_TEMPLATES.keys())[0] if self.PROMPT_TEMPLATES else "カスタム"
         self.prompt_template_var = tk.StringVar(value=initial_selection)
 
     def add_new_prompt(self):
         prompt_content = self.app_view.custom_prompt_text.get("1.0", tk.END).strip()
         if not prompt_content:
-            messagebox.showwarning("Save Error", "Prompt content is empty.", parent=self)
+            messagebox.showwarning(self.lang_manager.get("save_error_title"), self.lang_manager.get("prompt_empty_message"), parent=self)
             return
-        new_title = simpledialog.askstring("Save Prompt", "Enter a title for this prompt:", parent=self)
+        new_title = simpledialog.askstring(self.lang_manager.get("save_prompt_title"), self.lang_manager.get("save_prompt_message"), parent=self)
         if not new_title or not new_title.strip(): return
         new_title = new_title.strip()
         is_overwrite = new_title in self.PROMPT_TEMPLATES
         if is_overwrite:
-            if not messagebox.askyesno("Confirm", f"Prompt '{new_title}' already exists.\nOverwrite?", parent=self): return
+            if not messagebox.askyesno(self.lang_manager.get("confirm_overwrite_title"), self.lang_manager.get("confirm_overwrite_message").format(title=new_title), parent=self): return
         self.PROMPT_TEMPLATES[new_title] = prompt_content
         self._save_prompts_to_file()
         self.update_status(f"Prompt '{new_title}' {'updated' if is_overwrite else 'added'}.")
@@ -349,12 +411,12 @@ class FileRenamerApp(TkinterDnD.Tk):
     def delete_selected_prompt(self):
         selected_prompt = self.prompt_template_var.get()
         if selected_prompt == "カスタム" or selected_prompt == "Custom":
-            messagebox.showwarning("Cannot Delete", "The 'Custom' prompt cannot be deleted.", parent=self)
+            messagebox.showwarning(self.lang_manager.get("delete_error_title"), self.lang_manager.get("cannot_delete_custom_prompt"), parent=self)
             return
         if selected_prompt not in self.PROMPT_TEMPLATES:
-            messagebox.showerror("Error", "Prompt to be deleted not found.", parent=self)
+            messagebox.showerror(self.lang_manager.get("error_title"), self.lang_manager.get("prompt_not_found"), parent=self)
             return
-        if messagebox.askyesno("Confirm", f"Are you sure you want to delete the prompt '{selected_prompt}'?\nThis action cannot be undone.", parent=self):
+        if messagebox.askyesno(self.lang_manager.get("confirm_delete_title"), self.lang_manager.get("confirm_delete_message").format(title=selected_prompt), parent=self):
             del self.PROMPT_TEMPLATES[selected_prompt]
             self._save_prompts_to_file()
             self.update_status(f"Prompt '{selected_prompt}' deleted.")
@@ -367,7 +429,7 @@ class FileRenamerApp(TkinterDnD.Tk):
             with open(self.prompts_filepath, 'w', encoding='utf-8') as f:
                 json.dump(self.PROMPT_TEMPLATES, f, ensure_ascii=False, indent=4)
         except IOError as e:
-            messagebox.showerror("Save Error", f"Failed to save prompts file.\n{e}", parent=self)
+            messagebox.showerror(self.lang_manager.get("save_error_title"), f"Failed to save prompts file.\n{e}", parent=self)
 
     def _save_defaults_to_prompt_file(self):
         try:
@@ -418,15 +480,15 @@ class FileRenamerApp(TkinterDnD.Tk):
             download_url = data.get("download_url")
 
             if latest_version and latest_version > self.CURRENT_VERSION:
-                if messagebox.askyesno("Update Available", f"A new version ({latest_version}) is available.\nDo you want to open the download page?"):
+                if messagebox.askyesno(self.lang_manager.get("update_available_title"), self.lang_manager.get("update_available_message").format(version=latest_version)):
                     webbrowser.open(download_url)
             else:
-                messagebox.showinfo("No Updates", "You are using the latest version.")
+                messagebox.showinfo(self.lang_manager.get("no_updates_title"), self.lang_manager.get("no_updates_message"))
             self.after(0, self.update_status, self.lang_manager.get("status_update_check_complete"))
         except Exception as e:
             error_message = f"An error occurred while checking for updates: {e}"
             print(error_message)
-            messagebox.showerror("Error", error_message)
+            messagebox.showerror(self.lang_manager.get("error_title"), error_message)
             self.after(0, self.update_status, self.lang_manager.get("status_update_check_failed"))
 
     def open_donation_page(self):

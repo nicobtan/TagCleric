@@ -1,9 +1,8 @@
 # ==============================================================================
-# file: google_drive_handler.py (モデル選択機能追加版)
+# file: google_drive_handler.py (AI処理・速度改善版)
 # ==============================================================================
 import os
 import io
-import datetime
 import re
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -12,14 +11,14 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 from dotenv import load_dotenv
-from google.cloud import vision
-from google.cloud import language_v1
 import google.generativeai as genai
+from PIL import Image
 
 load_dotenv() 
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 class GoogleDriveHandler:
+    # (このクラスは今回変更ありません)
     def __init__(self):
         self.creds = self._authenticate_google_drive()
         if self.creds:
@@ -76,87 +75,74 @@ class GoogleDriveHandler:
             print(f"Google Drive ダウンロードエラー: {error}"); return None
 
 class GoogleAIApiHandler:
-    def __init__(self, gemini_api_key=None, model_name='gemini-1.5-flash'):
-        service_account_key_path = os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY_FILE', 'service_account_key.json')
-        if not os.path.exists(service_account_key_path):
-            self.vision_client, self.language_client = None, None
-        else:
-            try:
-                self.vision_client = vision.ImageAnnotatorClient.from_service_account_json(service_account_key_path)
-                self.language_client = language_v1.LanguageServiceClient.from_service_account_json(service_account_key_path)
-                print("Vision/Language API クライアントを初期化しました。")
-            except Exception as e:
-                self.vision_client, self.language_client = None, None
-
-        # --- モデル選択機能の追加 ---
+    def __init__(self, gemini_api_key=None, model_name='gemini-1.5-flash-latest'):
         self.model_name = model_name
-        # -------------------------
         self.generative_model = None
+        
+        self.vision_client = None 
+        self.language_client = None
+
         if not gemini_api_key:
             print("Gemini APIキーが提供されていないため、クライアントを初期化しませんでした。")
             return
 
         try:
             genai.configure(api_key=gemini_api_key)
-            # --- モデル選択機能の追加 ---
             self.generative_model = genai.GenerativeModel(self.model_name)
             print(f"Gemini API クライアント ({self.model_name}) を初期化しました。")
-            # -------------------------
         except Exception as e:
             print(f"Gemini API クライアント ({self.model_name}) の初期化に失敗: {e}")
             self.generative_model = None
 
-    def analyze_image_content(self, image_bytes, min_score=0.7):
-        if not self.vision_client: return [], False, "Vision APIクライアント未初期化。"
-        image = vision.Image(content=image_bytes); all_keywords = set()
-        try:
-            response_label = self.vision_client.label_detection(image=image)
-            for label in response_label.label_annotations:
-                if label.score >= min_score: all_keywords.add(label.description)
-            message = "Vision API: 分析成功" if all_keywords else "Vision API: キーワード検出なし。"
-            return sorted(list(all_keywords)), True, message
-        except Exception as e:
-            error_message = f"Vision API エラー: {e}"; print(error_message); return [], False, error_message
-
-    def analyze_text_entities(self, text_content):
-        if not self.language_client or not text_content: return []
-        document = language_v1.Document(content=text_content, type_=language_v1.Document.Type.PLAIN_TEXT)
-        try:
-            response = self.language_client.analyze_entities(document=document, encoding_type=language_v1.EncodingType.UTF8)
-            entities = {entity.name for entity in response.entities if entity.salience > 0.1}
-            return sorted(list(entities))
-        except Exception as e:
-            print(f"Natural Language API エラー: {e}"); return []
-
-    def generate_name_with_prompt(self, full_prompt):
+    def generate_name_from_image(self, image_bytes, user_prompt, language_mode):
+        """
+        画像データとプロンプトから直接ファイル名を生成する。
+        """
         if not self.generative_model:
             return "生成AI未初期化", False
         
-        final_prompt_with_instructions = f"""
-        あなたは、ファイル名を提案する優秀なアシスタントです。以下の指示に従って、最高のファイル名を返答してください。
-
-        # 指示
-        - これから渡される文章は、画像や動画のサムネイルなど、とあるコンテンツの内容を説明するものです。
-        - その内容を元に、ファイル名を生成してください。
-        - ファイル名にはスペースを含めず、単語や句の区切りはアンダースコア(_)を使用してください。
-        - 拡張子や余計な説明は一切含めず、提案するファイル名だけを返答してください。
-
-        # コンテンツの内容
-        {full_prompt}
-        """
-
         try:
-            response = self.generative_model.generate_content(final_prompt_with_instructions)
-            generated_name = response.text.strip()
-            generated_name = re.sub(r"```(python|text|)\n|```", "", generated_name)
-            generated_name = generated_name.replace(" ", "_").replace("　", "_")
-            return generated_name, True
-        except Exception as e:
-            print(f"Gemini API ({self.model_name}) の呼び出し中にエラーが発生しました: {e}")
-            return "APIエラー", False
+            img = Image.open(io.BytesIO(image_bytes))
+
+            # プロンプトを組み立てる
+            if language_mode == "日本語":
+                final_prompt = f"""
+                あなたはファイル名を提案する専門家です。
+                この画像の内容を分析し、ユーザーの指示に沿って、最も的確なファイル名を1つだけ生成してください。
+
+                # ユーザーからの指示
+                {user_prompt}
+
+                # ファイル名のルール
+                - 必ず日本語で回答してください。
+                - スペースはアンダースコア(_)に置き換えてください。
+                - 拡張子や余計な説明は一切含めず、ファイル名だけを返答してください。
+                """
+            else: # English
+                final_prompt = f"""
+                You are an expert in suggesting file names.
+                Analyze the content of this image and generate the single most appropriate filename based on the user's instructions.
+
+                # User Instructions
+                {user_prompt}
+
+                # Filename Rules
+                - You must answer in English.
+                - Replace spaces with underscores (_).
+                - Do not include file extensions or any extra descriptions; return only the filename.
+                """
+
+            print(f"Gemini APIに画像とプロンプトを送信中...")
+            response = self.generative_model.generate_content([final_prompt, img])
             
-    def generate_name_with_keywords(self, keywords):
-        if not keywords: return "キーワードなし", False
-        keywords_str = ", ".join(keywords)
-        prompt = f"以下のキーワードを元に、ファイル名を生成してください: {keywords_str}"
-        return self.generate_name_with_prompt(prompt)
+            generated_name = response.text.strip()
+            generated_name = re.sub(r"```(python|text|json|)\n|```", "", generated_name)
+            generated_name = generated_name.replace(" ", "_").replace("　", "_").replace("\n", "")
+            
+            print(f"Geminiからの提案名: {generated_name}")
+            return generated_name, True
+
+        except Exception as e:
+            error_message = f"Gemini API ({self.model_name}) の呼び出し中にエラーが発生しました: {e}"
+            print(error_message)
+            return "APIエラー", False

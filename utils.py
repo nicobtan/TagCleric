@@ -1,24 +1,119 @@
 # ==============================================================================
-# file: utils.py (パス解決ヘルパー追加)
+# file: utils.py (コンテキストメニュー対応版)
 # ==============================================================================
 import tkinter as tk
+from tkinter import ttk, scrolledtext
 import os
 import sys
 from PIL import Image, ImageTk
 from moviepy.editor import VideoFileClip
 
-# --- ★ここから新規追加：リソースパス解決関数 ---
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
-        # PyInstallerは一時フォルダを作成し、そのパスを_MEIPASSに格納する
         base_path = sys._MEIPASS
     except Exception:
-        # PyInstallerでない場合（通常の.py実行）は、実行ファイルのディレクトリ
         base_path = os.path.abspath(".")
-
     return os.path.join(base_path, relative_path)
+
+def get_config_dir(app_name="TagClericAI"):
+    """
+    アプリケーションの設定ファイルを保存するディレクトリを取得する。
+    実行ファイルと同じ場所に 'portable.flag' があればポータブルモードとして動作する。
+    なければOS標準のアプリケーションデータディレクトリを使用する。
+    """
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+    else:
+        exe_dir = os.path.abspath(".")
+
+    portable_flag_path = os.path.join(exe_dir, "portable.flag")
+
+    config_dir = ""
+    if os.path.exists(portable_flag_path):
+        print("ポータブルモードで実行します。設定はアプリケーションフォルダに保存されます。")
+        config_dir = exe_dir
+    else:
+        print("通常モードで実行します。設定はユーザーのAppDataフォルダに保存されます。")
+        if sys.platform == "win32":
+            config_dir = os.path.join(os.getenv('APPDATA'), app_name)
+        elif sys.platform == "darwin":
+            config_dir = os.path.join(os.path.expanduser('~/Library/Application Support'), app_name)
+        else:
+            config_dir = os.path.join(os.path.expanduser('~/.config'), app_name)
+
+    if not os.path.exists(config_dir):
+        try:
+            os.makedirs(config_dir)
+            print(f"作成された設定ディレクトリ: {config_dir}")
+        except Exception as e:
+            print(f"設定ディレクトリの作成に失敗しました: {e}")
+            return os.path.abspath(".")
+    
+    return config_dir
+
+# --- ★新規追加: テキストウィジェット用コンテキストメニュー ---
+class ContextMenu:
+    """A helper class to create a right-click context menu for text widgets."""
+    def __init__(self, widget):
+        self.widget = widget
+        self.menu = tk.Menu(widget, tearoff=0)
+        self.menu.add_command(label="切り取り (Cut)", command=self.cut)
+        self.menu.add_command(label="コピー (Copy)", command=self.copy)
+        self.menu.add_command(label="貼り付け (Paste)", command=self.paste)
+        self.menu.add_separator()
+        self.menu.add_command(label="すべて選択 (Select All)", command=self.select_all)
+        widget.bind("<Button-3>", self.show_menu)
+
+    def show_menu(self, event):
+        # メニュー項目の状態を動的に更新
+        has_selection = False
+        try:
+            if self.widget.selection_get():
+                has_selection = True
+        except (tk.TclError, IndexError):
+            pass
+
+        has_clipboard = False
+        try:
+            if self.widget.clipboard_get():
+                has_clipboard = True
+        except tk.TclError:
+            pass
+
+        self.menu.entryconfig("切り取り (Cut)", state="normal" if has_selection else "disabled")
+        self.menu.entryconfig("コピー (Copy)", state="normal" if has_selection else "disabled")
+        self.menu.entryconfig("貼り付け (Paste)", state="normal" if has_clipboard else "disabled")
+
+        self.menu.tk_popup(event.x_root, event.y_root)
+
+    def cut(self):
+        try:
+            self.widget.event_generate("<<Cut>>")
+        except tk.TclError:
+            pass
+
+    def copy(self):
+        try:
+            self.widget.event_generate("<<Copy>>")
+        except tk.TclError:
+            pass
+
+    def paste(self):
+        try:
+            self.widget.event_generate("<<Paste>>")
+        except tk.TclError:
+            pass
+
+    def select_all(self):
+        # ウィジェットのタイプに応じて「すべて選択」を処理
+        if isinstance(self.widget, (tk.Entry, ttk.Entry)):
+            self.widget.selection_range(0, 'end')
+        elif isinstance(self.widget, (tk.Text, scrolledtext.ScrolledText)):
+            self.widget.tag_add('sel', '1.0', 'end')
+        self.widget.focus_set()
 # --- ★追加ここまで ---
+
 
 class ToolTip:
     def __init__(self, widget, text):

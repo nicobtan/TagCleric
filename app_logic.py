@@ -1,5 +1,5 @@
 # ==============================================================================
-# file: app_logic.py (v1.0.1 修正版)
+# file: app_logic.py (パフォーマンス改善版)
 # ==============================================================================
 import os
 import datetime
@@ -8,7 +8,7 @@ from threading import Thread
 import io
 from PIL import Image, ImageTk
 import tkinter as tk
-from tkinter import ttk,StringVar, font, messagebox # <--- 修正箇所: messageboxをインポート
+from tkinter import ttk,StringVar, font, messagebox
 
 from utils import generate_video_thumbnail, get_video_frame_as_pil
 
@@ -16,46 +16,6 @@ class AppLogic:
     def __init__(self, app_instance):
         self.app = app_instance
         self.lang = app_instance.lang_manager
-
-    def generate_ai_suggested_name(self, file_name, file_content_bytes, ai_handler, mime_type, add_creation_date, date_format, remove_original_name, creation_time, ai_min_score, ai_max_keywords, ai_fallback_name, language_mode, custom_prompt):
-        base_name, ext = os.path.splitext(file_name)
-        is_analyzable = file_content_bytes is not None
-        api_success, keywords_found = False, False
-        vision_keywords = []
-        ai_generated_part = ""
-        if ai_handler and ai_handler.vision_client and is_analyzable:
-            print(f"Vision APIで'{base_name}'のコンテンツを分析中...")
-            vision_keywords, api_success, message = ai_handler.analyze_image_content(file_content_bytes, min_score=ai_min_score)
-            keywords_found = api_success and vision_keywords
-            print(message)
-        else:
-            print("Vision APIはスキップされました（分析対象のデータがないか、クライアント未初期化）。")
-        if not keywords_found and is_analyzable:
-            ai_generated_part = ai_fallback_name
-            print(f"キーワードが見つからなかったため、代替名'{ai_fallback_name}'を使用します。")
-        elif keywords_found:
-            limited_keywords = vision_keywords[:ai_max_keywords]
-            print(f"使用するキーワード ({len(limited_keywords)}個): {', '.join(limited_keywords)}")
-            final_prompt = custom_prompt.replace("{keywords}", ', '.join(limited_keywords))
-            if language_mode == "日本語":
-                final_prompt += "\n\n重要: 必ず日本語で回答してください。"
-            print(f"Gemini APIに名前生成をリクエスト中...")
-            name_suggestion, success = ai_handler.generate_name_with_prompt(final_prompt)
-            if success:
-                ai_generated_part = name_suggestion
-                print(f"Geminiからの提案名: {name_suggestion}")
-            else:
-                ai_generated_part = ai_fallback_name
-                print(f"名前生成に失敗したため、代替名'{ai_fallback_name}'を使用します。")
-        new_base_name_parts = []
-        if add_creation_date and creation_time:
-            try: new_base_name_parts.append(creation_time.strftime(date_format))
-            except Exception as e: print(f"日付フォーマットエラー: {e}")
-        if ai_generated_part: new_base_name_parts.append(ai_generated_part)
-        if not remove_original_name: new_base_name_parts.append(base_name)
-        final_base_name = '_'.join(filter(None, new_base_name_parts))
-        if not final_base_name: final_base_name = base_name if not remove_original_name else ai_fallback_name
-        return f"{final_base_name}{ext}", api_success, keywords_found, "OK", vision_keywords
 
     def load_local_files_logic(self):
         if self.app.is_processing: return
@@ -184,14 +144,16 @@ class AppLogic:
         try:
             self.app.cancel_requested.clear()
             self.app.update_status(self.lang.get("status_suggesting_names").format(count=len(selected_items)))
+            
             config = {
-                'ai_handler': self.app.ai_handler, 'add_creation_date': self.app.add_date_var.get(),
-                'date_format': self.app.date_format_var.get(), 'remove_original_name': self.app.remove_original_name_var.get(),
-                'ai_min_score': self.app.ai_min_score_var.get(), 'ai_max_keywords': self.app.ai_max_keywords_var.get(),
+                'add_creation_date': self.app.add_date_var.get(),
+                'date_format': self.app.date_format_var.get(),
+                'remove_original_name': self.app.remove_original_name_var.get(),
                 'ai_fallback_name': self.app.ai_fallback_name_var.get(), 
                 'language_mode': self.app.language_mode_var.get(),
                 'custom_prompt': self.app.app_view.custom_prompt_text.get("1.0", tk.END).strip()
             }
+
             for i, item_id in enumerate(selected_items):
                 if self.app.cancel_requested.is_set():
                     self.app.update_status(self.lang.get("status_processing_interrupted").format(done=i, total=len(selected_items)))
@@ -201,9 +163,10 @@ class AppLogic:
                 
                 values = self.app.app_view.local_tree.item(item_id, 'values')
                 old_name, _, file_path, _, _, creation_dt_iso = values
+                base_name, ext = os.path.splitext(old_name)
 
                 file_content_bytes = None
-                file_ext = os.path.splitext(file_path)[1].lower()
+                file_ext = ext.lower()
                 image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
                 video_exts = ['.mp4', '.mov', '.avi', '.wmv', '.flv']
 
@@ -220,13 +183,53 @@ class AppLogic:
                      self.app.after(0, self.app.app_view.local_tree.set, item_id, "ai_status", "分析不可")
                      continue
 
-                creation_dt = datetime.datetime.fromisoformat(creation_dt_iso)
-                new_name, _, _, _, _ = self.generate_ai_suggested_name(
-                    file_name=old_name, file_content_bytes=file_content_bytes, mime_type=None,
-                    creation_time=creation_dt, **config
+                # --- ★追加: AI送信前に画像をリサイズして最適化 ---
+                optimized_bytes = None
+                try:
+                    with Image.open(io.BytesIO(file_content_bytes)) as img:
+                        # 画像が大きすぎる場合、リサイズしてAPIへの負荷を軽減
+                        img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+                        
+                        optimized_buffer = io.BytesIO()
+                        img.save(optimized_buffer, format="PNG")
+                        optimized_bytes = optimized_buffer.getvalue()
+                        print(f"画像を最適化しました (サイズ: {len(optimized_bytes)} bytes)")
+                except Exception as e:
+                    print(f"画像最適化エラー: {e}")
+                    self.app.after(0, self.app.app_view.local_tree.set, item_id, "ai_status", "画像エラー")
+                    continue
+                # --- ★追加ここまで ---
+
+                ai_generated_part, success = self.app.ai_handler.generate_name_from_image(
+                    optimized_bytes, config['custom_prompt'], config['language_mode']
                 )
+                if not success:
+                    ai_generated_part = config['ai_fallback_name']
+                
+                new_base_name_parts = []
+                creation_dt = datetime.datetime.fromisoformat(creation_dt_iso)
+                
+                if config['add_creation_date'] and creation_dt:
+                    try: 
+                        new_base_name_parts.append(creation_dt.strftime(config['date_format']))
+                    except Exception as e: 
+                        print(f"日付フォーマットエラー: {e}")
+                
+                if ai_generated_part: 
+                    new_base_name_parts.append(ai_generated_part)
+                
+                if not config['remove_original_name']: 
+                    new_base_name_parts.append(base_name)
+                
+                final_base_name = '_'.join(filter(None, new_base_name_parts))
+                if not final_base_name:
+                    final_base_name = base_name if not config['remove_original_name'] else config['ai_fallback_name']
+
+                new_name = f"{final_base_name}{ext}"
+                
                 self.app.after(0, self.app.app_view.local_tree.set, item_id, "new_name", new_name)
                 self.app.after(0, self.app.app_view.local_tree.set, item_id, "ai_status", "提案済み")
+
             self.app.update_status(self.lang.get("status_suggestion_complete"))
         finally:
             self.app.after(0, self.app.toggle_ui_state, False)
@@ -268,13 +271,10 @@ class AppLogic:
 
         message = self.lang.get("msgbox_info_about_msg").format(version=self.app.CURRENT_VERSION)
         
-        # メッセージとリンクを配置
         ttk.Label(main_frame, text=message, justify=tk.LEFT).pack(pady=(0, 10))
 
-        
-        link_label = ttk.Label(main_frame, text=self.lang.get("about_api_page_link_text"), foreground="blue", cursor="hand2")
         link_font = font.Font(family="Yu Gothic UI", size=9, underline=True)
-        # APIキーの説明
+
         api_key_link = ttk.Label(main_frame, text=self.lang.get("about_api_key_link_text"), foreground="blue", cursor="hand2", font=link_font)
         api_key_link.pack(pady=2)
         api_key_link.bind("<Button-1>", lambda e: self.app.open_api_key_page())
