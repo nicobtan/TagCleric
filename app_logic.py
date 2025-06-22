@@ -1,5 +1,5 @@
 # ==============================================================================
-# file: app_logic.py (v1.0.0 リリース版)
+# file: app_logic.py (v1.0.1 修正版)
 # ==============================================================================
 import os
 import datetime
@@ -8,7 +8,7 @@ from threading import Thread
 import io
 from PIL import Image, ImageTk
 import tkinter as tk
-from tkinter import ttk,StringVar, font
+from tkinter import ttk,StringVar, font, messagebox # <--- 修正箇所: messageboxをインポート
 
 from utils import generate_video_thumbnail, get_video_frame_as_pil
 
