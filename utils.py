@@ -1,12 +1,12 @@
 # ==============================================================================
-# file: utils.py (コンテキストメニュー対応版)
+# file: utils.py (循環参照修正版)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 import os
 import sys
 from PIL import Image, ImageTk
-from moviepy.editor import VideoFileClip
+# from moviepy.editor import VideoFileClip # <- 起動時のインポートを削除
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -52,7 +52,6 @@ def get_config_dir(app_name="TagClericAI"):
     
     return config_dir
 
-# --- ★新規追加: テキストウィジェット用コンテキストメニュー ---
 class ContextMenu:
     """A helper class to create a right-click context menu for text widgets."""
     def __init__(self, widget):
@@ -66,7 +65,6 @@ class ContextMenu:
         widget.bind("<Button-3>", self.show_menu)
 
     def show_menu(self, event):
-        # メニュー項目の状態を動的に更新
         has_selection = False
         try:
             if self.widget.selection_get():
@@ -106,13 +104,11 @@ class ContextMenu:
             pass
 
     def select_all(self):
-        # ウィジェットのタイプに応じて「すべて選択」を処理
         if isinstance(self.widget, (tk.Entry, ttk.Entry)):
             self.widget.selection_range(0, 'end')
         elif isinstance(self.widget, (tk.Text, scrolledtext.ScrolledText)):
             self.widget.tag_add('sel', '1.0', 'end')
         self.widget.focus_set()
-# --- ★追加ここまで ---
 
 
 class ToolTip:
@@ -149,12 +145,16 @@ def get_video_frame_as_pil(video_path):
     動画ファイルからフレームを抽出し、PIL.Imageオブジェクトとして返す。
     """
     try:
+        from moviepy.editor import VideoFileClip
         with VideoFileClip(str(video_path)) as clip:
             frame_time = min(clip.duration / 2, 1.0) if clip.duration > 0 else 0
             frame = clip.get_frame(frame_time)
             return Image.fromarray(frame)
     except Exception as e:
-        print(f"動画フレームのPILイメージとしての取得エラー: {video_path} -> {e}")
+        if isinstance(e, ImportError):
+             print(f"動画処理ライブラリ(moviepy)の読み込みに失敗しました。インストールされていない可能性があります。")
+        else:
+            print(f"動画フレームのPILイメージとしての取得エラー: {video_path} -> {e}")
         return None
 
 def generate_video_thumbnail(video_path, size):

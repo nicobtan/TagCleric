@@ -1,5 +1,5 @@
 # ==============================================================================
-# file: main_app.py (プロンプト・速度改善版 v1.0.4)
+# file: main_app.py (v1.0.0 リリース版)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font, scrolledtext, simpledialog
@@ -46,7 +46,7 @@ class TextRedirector:
     def flush(self): pass
 
 class FileRenamerApp(TkinterDnD.Tk):
-    CURRENT_VERSION = "1.0.4" # バージョンアップ
+    CURRENT_VERSION = "1.0.0" # リリースバージョン
 
     def __init__(self):
         super().__init__()
@@ -200,30 +200,17 @@ class FileRenamerApp(TkinterDnD.Tk):
         settings_menu.add_command(label=self.lang_manager.get("exit_menu"), command=self.on_closing)
 
     def switch_language(self, lang_code):
+        """Saves the new language setting and prompts the user to restart manually."""
         if self.lang_manager.language_code == lang_code:
             return
         
-        if messagebox.askokcancel(self.lang_manager.get("lang_change_title"), self.lang_manager.get("lang_change_message")):
-            self.save_language_setting(lang_code)
-            self.restart_app()
-
-    def restart_app(self):
-        self.save_config()
-        try:
-            if getattr(sys, 'frozen', False):
-                executable = sys.executable
-                args = []
-            else:
-                executable = sys.executable
-                args = sys.argv
-            
-            subprocess.Popen([executable] + args)
-            
-            self.destroy()
-            sys.exit()
-        except Exception as e:
-            messagebox.showerror("Restart Error", f"Failed to restart the application.\nPlease restart it manually.\n\nError: {e}")
-
+        self.save_language_setting(lang_code)
+        
+        messagebox.showinfo(
+            self.lang_manager.get("lang_change_title", "Language Change"),
+            self.lang_manager.get("lang_change_manual_restart_message", "Language settings have been saved.\nPlease restart the application to apply the changes.")
+        )
+    
     def init_ai_handler(self):
         try:
             self.ai_handler = GoogleAIApiHandler(
@@ -235,7 +222,6 @@ class FileRenamerApp(TkinterDnD.Tk):
 
     def setup_variables(self):
         self.THUMBNAIL_SIZE = (180, 180)
-        # --- ★修正: gemini-2.0-flash-lite をリストに追加し、デフォルトに設定 ---
         self.GEMINI_MODELS = [
             "gemini-2.0-flash-lite",
             "gemini-1.5-flash-latest", 
@@ -255,12 +241,12 @@ class FileRenamerApp(TkinterDnD.Tk):
         self.language_mode_var = tk.StringVar(value="日本語")
         self.gemini_api_key_var = tk.StringVar(value="")
         self.PROMPT_TEMPLATES = {
+            "人物の特徴を詳しく一文で": "写っている人物の見た目、服装、表情、ポーズなどを詳細に表現するようなファイル名を一文で生成してください。",
             "人物の特徴を詳しく": "写っている人物の見た目、服装、表情、ポーズなどを詳細に表現するようなファイル名を生成してください。",
             "背景を重視して": "写っている場所や背景の雰囲気、時間帯が伝わるようなファイル名を生成してください。",
             "アーティスティックな表現で": "構図や光の使い方、色彩など、写真や絵画としての芸術性を表現するような詩的なファイル名を生成してください。",
             "人物の特徴を詳しく一節で": "写っている人物の見た目、服装、表情、ポーズなどを詳細に表現するようなファイル名を一節で生成してください。",
-            "人物の特徴を詳しく一文で": "写っている人物の見た目、服装、表情、ポーズなどを詳細に表現するようなファイル名を一文で生成してください。",
-            "カスタム": "画像の内容を要約し、ユニークで分かりやすいファイル名を生成してください。"
+            "カスタム": "ここを書き換えて自由にプロンプトを試してみて下さい。"
         }
         self.prompt_template_var = None
         self.selected_language_var = tk.StringVar(value='ja')
@@ -300,14 +286,19 @@ class FileRenamerApp(TkinterDnD.Tk):
             self.gemini_model_var.set(config.get('Settings', 'GeminiModel', fallback=self.GEMINI_MODELS[0]))
 
     def save_config(self):
+        """Saves current settings (except language) to the config file."""
         config = configparser.ConfigParser()
         if os.path.exists(self.config_filepath):
              config.read(self.config_filepath, encoding='utf-8')
         if not config.has_section('Settings'):
             config.add_section('Settings')
+        
         config.set('Settings', 'GeminiApiKey', self.gemini_api_key_var.get())
         config.set('Settings', 'GeminiModel', self.gemini_model_var.get())
-        config.set('Settings', 'Language', self.lang_manager.language_code)
+        
+        if not config.has_option('Settings', 'Language'):
+            config.set('Settings', 'Language', self.lang_manager.language_code)
+
         try:
             with open(self.config_filepath, 'w', encoding='utf-8') as configfile:
                 config.write(configfile)
