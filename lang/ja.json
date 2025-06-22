@@ -74,6 +74,7 @@
     "msgbox_confirm_rename_title": "確認",
     "msgbox_confirm_rename_msg": "{count}個のファイルをリネームしますか？",
     "msgbox_info_about_title": "アプリについて",
-    "msgbox_info_about_msg": "タグクレ(TagCleric) AIファイルリネームソフト v{version}\n\nこのソフトウェアは、使用許諾契約書(EULA.txt)に基づいて提供されます。\n\nもしこのツールが役に立ったと感じたら、寄付によるご支援をいただけますと幸いです。\n今後の開発の励みになります！\n\n開発支援: Google Gemini",
-    "about_app_page_link_text": "＊アプリのページ＊"
+    "msgbox_info_about_msg": "タグクレリック(TagCleric) AIファイルリネームソフト v{version}\n\nこのソフトウェアは、使用許諾契約書(EULA.txt)に基づいて提供されます。\n\nもしこのツールが役に立ったと感じたら、寄付によるご支援をいただけますと幸いです。\n今後の開発の励みになります！\n\n開発支援: Google Gemini",
+    "about_app_page_link_text": "＊アプリのページ＊",
+    "about_api_key_link_text": "＊Gemini APIキーの取得方法はこちら＊"
 }

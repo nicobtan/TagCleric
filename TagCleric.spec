@@ -5,7 +5,7 @@ a = Analysis(
     ['main_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('lang', 'lang'), ('TagClericIcon.ico', '.'), ('utils.py', '.'), ('language_manager.py', '.'), ('google_drive_handler.py', '.'), ('file_system_handler.py', '.'), ('app_view.py', '.'), ('app_logic.py', '.')],
+    datas=[('lang', 'lang'), ('TagClericIcon.ico', '.'), ('config.template.ini', '.'),('utils.py', '.'), ('language_manager.py', '.'), ('google_drive_handler.py', '.'), ('file_system_handler.py', '.'), ('app_view.py', '.'), ('app_logic.py', '.')],
     hiddenimports=['moviepy.editor', 'requests', 'google.cloud.vision', 'google.cloud.language_v1', 'google.generativeai'],
     hookspath=[],
     hooksconfig={},

@@ -86,9 +86,10 @@ class FileRenamerApp(TkinterDnD.Tk):
             config.read(self.config_filepath, encoding='utf-8')
         
         self.UPDATE_INFO_URL = config.get('Links', 'UpdateInfoURL', fallback="https://gist.githubusercontent.com/nicobtan/724c59750c93cf7a296117e345a2f0c5/raw/version.json")
-        self.DONATION_URL = config.get('Links', 'DonationURL', fallback="https://www.buymeacoffee.com/yourpage")
+        self.DONATION_URL = config.get('Links', 'DonationURL', fallback="https://portfoliopage-25077.web.app/donation.html")
         self.PROMPT_IDEA_URL = config.get('Links', 'PromptIdeaURL', fallback="https://note.com/mate_inc/n/n31b96d35a5c6")
         self.ABOUT_URL = config.get('Links', 'AboutURL', fallback="https://github.com/")
+        self.API_KEY_URL = config.get('Links', 'ApiKeyURL', fallback="https://ai.google.dev/gemini-api/docs/api-key?hl=ja")
 
     def _configure_styles(self):
         default_font = font.nametofont("TkDefaultFont")
@@ -430,7 +431,10 @@ class FileRenamerApp(TkinterDnD.Tk):
 
     def open_donation_page(self):
         webbrowser.open(self.DONATION_URL)
-        
+
+    def open_api_key_page(self):
+        webbrowser.open(self.API_KEY_URL)
+
     def open_app_page(self):
         webbrowser.open(self.ABOUT_URL)
 

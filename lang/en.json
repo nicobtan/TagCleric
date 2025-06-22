@@ -74,6 +74,7 @@
     "msgbox_confirm_rename_title": "Confirm",
     "msgbox_confirm_rename_msg": "Are you sure you want to rename {count} files?",
     "msgbox_info_about_title": "About",
-    "msgbox_info_about_msg": "AI File Renamer v{version}\n\nThis software is provided under the EULA (EULA.txt).\n\nIf you find this tool helpful, please consider supporting its development with a donation.\n\nDevelopment supported by: Google Gemini",
-    "about_app_page_link_text": "* App Page *"
+    "msgbox_info_about_msg": "TagCleric v{version}\n\nThis software is provided under the EULA (EULA.txt).\n\nIf you find this tool helpful, please consider supporting its development with a donation.\n\nDevelopment supported by: Google Gemini",
+    "about_app_page_link_text": "* App Page *",
+    "about_api_key_link_text": "* How to get a Gemini API Key *"
 }

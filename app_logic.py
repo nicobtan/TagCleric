@@ -270,13 +270,18 @@ class AppLogic:
         
         # メッセージとリンクを配置
         ttk.Label(main_frame, text=message, justify=tk.LEFT).pack(pady=(0, 10))
+
         
-        link_label = ttk.Label(main_frame, text=self.lang.get("about_app_page_link_text"), foreground="blue", cursor="hand2")
-        link_font = font.Font(link_label, link_label.cget("font"))
-        link_font.configure(underline=True)
-        link_label.configure(font=link_font)
-        link_label.pack(pady=5)
-        link_label.bind("<Button-1>", lambda e: self.app.open_app_page())
+        link_label = ttk.Label(main_frame, text=self.lang.get("about_api_page_link_text"), foreground="blue", cursor="hand2")
+        link_font = font.Font(family="Yu Gothic UI", size=9, underline=True)
+        # APIキーの説明
+        api_key_link = ttk.Label(main_frame, text=self.lang.get("about_api_key_link_text"), foreground="blue", cursor="hand2", font=link_font)
+        api_key_link.pack(pady=2)
+        api_key_link.bind("<Button-1>", lambda e: self.app.open_api_key_page())
+
+        app_page_link = ttk.Label(main_frame, text=self.lang.get("about_app_page_link_text"), foreground="blue", cursor="hand2", font=link_font)
+        app_page_link.pack(pady=2)
+        app_page_link.bind("<Button-1>", lambda e: self.app.open_app_page())
 
         ok_button = ttk.Button(main_frame, text="OK", command=about_window.destroy)
         ok_button.pack(pady=(15, 0))
