@@ -1,6 +1,8 @@
 # ==============================================================================
-# file: app_logic.py (パフォーマンス改善版)
+# file: app_logic.py (連番機能修正版)
 # ==============================================================================
+from __future__ import annotations
+import typing
 import os
 import datetime
 from collections import defaultdict
@@ -12,8 +14,12 @@ from tkinter import ttk,StringVar, font, messagebox
 
 from utils import generate_video_thumbnail, get_video_frame_as_pil
 
+if typing.TYPE_CHECKING:
+    from main_app import FileRenamerApp
+
+
 class AppLogic:
-    def __init__(self, app_instance):
+    def __init__(self, app_instance: 'FileRenamerApp'):
         self.app = app_instance
         self.lang = app_instance.lang_manager
 
@@ -114,8 +120,7 @@ class AppLogic:
         entry.bind("<FocusOut>", on_edit_end)
 
     def suggest_local_names_logic(self):
-        if self.app.is_processing:
-            return
+        if self.app.is_processing: return
         api_key = self.app.gemini_api_key_var.get()
         if not api_key:
             messagebox.showwarning("API Key Not Set", "To use AI functions, please enter your Gemini API key in the settings.")
@@ -131,13 +136,12 @@ class AppLogic:
                 messagebox.showerror("API Initialization Error", "Failed to initialize Gemini API client.\nPlease check your API key.")
                 return
 
-        self.app.toggle_ui_state(processing=True)
         selected_items = self.app.app_view.local_tree.selection()
         if not selected_items:
             messagebox.showwarning(self.lang.get("msgbox_warn_select_files_title"), self.lang.get("msgbox_warn_select_files_msg"))
-            self.app.toggle_ui_state(processing=False)
             return
-        
+
+        self.app.toggle_ui_state(processing=True)
         Thread(target=self._suggest_names_task, args=(selected_items,), daemon=True).start()
 
     def _suggest_names_task(self, selected_items):
@@ -149,10 +153,18 @@ class AppLogic:
                 'add_creation_date': self.app.add_date_var.get(),
                 'date_format': self.app.date_format_var.get(),
                 'remove_original_name': self.app.remove_original_name_var.get(),
+                'add_folder_name': self.app.add_folder_name_var.get(),
+                'folder_name_to_add': self.app.folder_name_to_add_var.get().strip(),
                 'ai_fallback_name': self.app.ai_fallback_name_var.get(), 
                 'language_mode': self.app.language_mode_var.get(),
-                'custom_prompt': self.app.app_view.custom_prompt_text.get("1.0", tk.END).strip()
+                'custom_prompt': self.app.app_view.custom_prompt_text.get("1.0", tk.END).strip(),
+                # ★修正: 連番設定をconfigに追加
+                'add_sequence_number': self.app.add_sequence_var.get()
             }
+            
+            # ★追加: 提案されたベース名を追跡するための辞書
+            name_counts = defaultdict(int)
+            previous_file_path = None
 
             for i, item_id in enumerate(selected_items):
                 if self.app.cancel_requested.is_set():
@@ -164,6 +176,12 @@ class AppLogic:
                 values = self.app.app_view.local_tree.item(item_id, 'values')
                 old_name, _, file_path, _, _, creation_dt_iso = values
                 base_name, ext = os.path.splitext(old_name)
+
+                if previous_file_path:
+                    self.app.after(0, self._show_thumbnail_local, previous_file_path)
+                else: 
+                    self.app.after(0, self._show_thumbnail_local, file_path)
+
 
                 file_content_bytes = None
                 file_ext = ext.lower()
@@ -181,31 +199,36 @@ class AppLogic:
                 
                 if not file_content_bytes:
                      self.app.after(0, self.app.app_view.local_tree.set, item_id, "ai_status", "分析不可")
+                     previous_file_path = file_path 
                      continue
 
-                # --- ★追加: AI送信前に画像をリサイズして最適化 ---
                 optimized_bytes = None
                 try:
                     with Image.open(io.BytesIO(file_content_bytes)) as img:
-                        # 画像が大きすぎる場合、リサイズしてAPIへの負荷を軽減
                         img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-                        
                         optimized_buffer = io.BytesIO()
                         img.save(optimized_buffer, format="PNG")
                         optimized_bytes = optimized_buffer.getvalue()
-                        print(f"画像を最適化しました (サイズ: {len(optimized_bytes)} bytes)")
                 except Exception as e:
                     print(f"画像最適化エラー: {e}")
                     self.app.after(0, self.app.app_view.local_tree.set, item_id, "ai_status", "画像エラー")
+                    previous_file_path = file_path 
                     continue
-                # --- ★追加ここまで ---
 
-                ai_generated_part, success = self.app.ai_handler.generate_name_from_image(
+                ai_generated_part, success, tokens_used = self.app.ai_handler.generate_name_from_image(
                     optimized_bytes, config['custom_prompt'], config['language_mode']
                 )
+
                 if not success:
-                    ai_generated_part = config['ai_fallback_name']
+                    if ai_generated_part == "QUOTA_EXCEEDED":
+                        self.app.after(0, self.app.show_quota_error_message, self.app.gemini_model_var.get())
+                        break 
+                    else:
+                        ai_generated_part = config['ai_fallback_name']
                 
+                if success:
+                    self.app.after(0, self.app.increment_and_update_usage, tokens_used)
+
                 new_base_name_parts = []
                 creation_dt = datetime.datetime.fromisoformat(creation_dt_iso)
                 
@@ -215,20 +238,36 @@ class AppLogic:
                     except Exception as e: 
                         print(f"日付フォーマットエラー: {e}")
                 
+                if config['add_folder_name'] and config['folder_name_to_add']:
+                    new_base_name_parts.append(config['folder_name_to_add'])
+                
                 if ai_generated_part: 
                     new_base_name_parts.append(ai_generated_part)
                 
                 if not config['remove_original_name']: 
                     new_base_name_parts.append(base_name)
                 
-                final_base_name = '_'.join(filter(None, new_base_name_parts))
-                if not final_base_name:
-                    final_base_name = base_name if not config['remove_original_name'] else config['ai_fallback_name']
+                base_name_candidate = '_'.join(filter(None, new_base_name_parts))
+                if not base_name_candidate:
+                    base_name_candidate = base_name if not config['remove_original_name'] else config['ai_fallback_name']
 
+                # ★修正: 連番追加ロジック
+                final_base_name = base_name_candidate
+                if config['add_sequence_number']:
+                    name_counts[base_name_candidate] += 1
+                    count = name_counts[base_name_candidate]
+                    if count > 1:
+                        final_base_name = f"{base_name_candidate}_{count}"
+                
                 new_name = f"{final_base_name}{ext}"
                 
                 self.app.after(0, self.app.app_view.local_tree.set, item_id, "new_name", new_name)
                 self.app.after(0, self.app.app_view.local_tree.set, item_id, "ai_status", "提案済み")
+                
+                previous_file_path = file_path
+
+            if previous_file_path:
+                self.app.after(0, self._show_thumbnail_local, previous_file_path)
 
             self.app.update_status(self.lang.get("status_suggestion_complete"))
         finally:
@@ -259,30 +298,22 @@ class AppLogic:
     
     def show_about_dialog(self):
         if self.app.is_processing: return
-
         about_window = tk.Toplevel(self.app)
         about_window.title(self.lang.get("msgbox_info_about_title"))
         about_window.transient(self.app)
         about_window.grab_set()
         about_window.resizable(False, False)
-
         main_frame = ttk.Frame(about_window, padding="20")
         main_frame.pack(expand=True, fill="both")
-
         message = self.lang.get("msgbox_info_about_msg").format(version=self.app.CURRENT_VERSION)
-        
         ttk.Label(main_frame, text=message, justify=tk.LEFT).pack(pady=(0, 10))
-
         link_font = font.Font(family="Yu Gothic UI", size=9, underline=True)
-
         api_key_link = ttk.Label(main_frame, text=self.lang.get("about_api_key_link_text"), foreground="blue", cursor="hand2", font=link_font)
         api_key_link.pack(pady=2)
         api_key_link.bind("<Button-1>", lambda e: self.app.open_api_key_page())
-
         app_page_link = ttk.Label(main_frame, text=self.lang.get("about_app_page_link_text"), foreground="blue", cursor="hand2", font=link_font)
         app_page_link.pack(pady=2)
         app_page_link.bind("<Button-1>", lambda e: self.app.open_app_page())
-
         ok_button = ttk.Button(main_frame, text="OK", command=about_window.destroy)
         ok_button.pack(pady=(15, 0))
         ok_button.focus_set()

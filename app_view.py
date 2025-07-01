@@ -1,13 +1,19 @@
 # ==============================================================================
-# file: app_view.py (コンテキストメニュー対応版)
+# file: app_view.py (UIコンパクト化・最終版)
 # ==============================================================================
+from __future__ import annotations
+import typing
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 from tkinterdnd2 import DND_FILES
-from utils import ToolTip, ContextMenu # ★修正: ContextMenuをインポート
+from utils import ToolTip, ContextMenu
+
+if typing.TYPE_CHECKING:
+    from main_app import FileRenamerApp
+
 
 class AppView:
-    def __init__(self, app_instance):
+    def __init__(self, app_instance: 'FileRenamerApp'):
         self.app = app_instance
         self.lang = app_instance.lang_manager 
         self._setup_ui_references()
@@ -36,12 +42,10 @@ class AppView:
         self.prompt_idea_button = None
         self.template_combo = None
         self.gdrive_auth_button = None
-        # ★追加: コンテキストメニューを適用するウィジェットの参照
         self.gemini_api_key_entry = None
+        self.api_key_help_label = None
         self.date_format_entry = None
-        self.ai_min_score_entry = None
-        self.ai_max_keywords_entry = None
-        self.ai_fallback_name_entry = None
+        self.folder_name_to_add_entry = None
 
     def create_local_file_tab(self, parent_frame):
         parent_frame.rowconfigure(0, weight=0)
@@ -53,7 +57,7 @@ class AppView:
         top_frame.columnconfigure(0, weight=0) 
         top_frame.columnconfigure(1, weight=1)
 
-        left_panel = ttk.Frame(top_frame, width=400)
+        left_panel = ttk.Frame(top_frame, width=350)
         left_panel.grid(row=0, column=0, sticky='ns', padx=(0, 10))
         left_panel.pack_propagate(False)
         left_panel.rowconfigure(0, weight=1)
@@ -78,10 +82,11 @@ class AppView:
         ttk.Label(filter_frame, text=self.lang.get("target_extensions")).grid(row=0, column=0, padx=(0,5), sticky='w')
         self.file_types_entry = ttk.Entry(filter_frame, textvariable=self.app.file_types_var)
         self.file_types_entry.grid(row=0, column=1, sticky='ew')
-        ContextMenu(self.file_types_entry) # ★追加
+        ContextMenu(self.file_types_entry)
 
-        self.app.style.configure('Accent.TButton', foreground='white', background='#0078D7')
-        self.app.style.configure('Info.TButton', foreground='white', background='#17a2b8')
+        # ★修正: コンパクトなボタンスタイルを定義
+        self.app.style.configure('Info.TButton', foreground='white', background='#17a2b8', padding=(5, 1))
+        self.app.style.configure('Compact.TButton', padding=(5, 1))
 
         right_panel = ttk.Frame(top_frame)
         right_panel.grid(row=0, column=1, sticky='nsew') 
@@ -93,13 +98,13 @@ class AppView:
         log_frame.pack_propagate(False) 
         self.log_viewer = scrolledtext.ScrolledText(log_frame, state='disabled', wrap=tk.WORD, font=('Yu Gothic UI', 8))
         self.log_viewer.pack(expand=True, fill='both', padx=5, pady=5)
-        ContextMenu(self.log_viewer) # ★追加
+        ContextMenu(self.log_viewer)
 
-        thumbnail_frame = ttk.LabelFrame(right_panel, text=self.lang.get("thumbnail"), width=200, height=200)
+        thumbnail_frame = ttk.LabelFrame(right_panel, text=self.lang.get("thumbnail"), width=230, height=180)
         thumbnail_frame.grid(row=0, column=1, sticky='ns') 
         thumbnail_frame.pack_propagate(False) 
         self.thumbnail_label = ttk.Label(thumbnail_frame, text=self.lang.get("select_file_for_preview"), anchor="center")
-        self.thumbnail_label.pack(expand=True, fill='both')
+        self.thumbnail_label.pack(pady=2, padx=2)
 
         list_frame = ttk.Frame(parent_frame)
         list_frame.grid(row=1, column=0, padx=5, pady=(5,0), sticky='nsew')
@@ -109,13 +114,14 @@ class AppView:
         list_controls_frame = ttk.Frame(list_frame)
         list_controls_frame.grid(row=0, column=0, sticky='ew', pady=(0,5))
         
-        self.donate_button = ttk.Button(list_controls_frame, text=self.lang.get("donate"))
+        # ★修正: コンパクトなボタンスタイルを適用
+        self.donate_button = ttk.Button(list_controls_frame, text=self.lang.get("donate"), style='Compact.TButton')
         self.donate_button.pack(side='right', padx=(5,0))
-        self.update_button = ttk.Button(list_controls_frame, text=self.lang.get("check_for_updates"))
+        self.update_button = ttk.Button(list_controls_frame, text=self.lang.get("check_for_updates"), style='Compact.TButton')
         self.update_button.pack(side='right', padx=(5,0))
         self.about_button = ttk.Button(list_controls_frame, text=self.lang.get("about_app"), style='Info.TButton')
         self.about_button.pack(side='right', padx=(5,0))
-        self.clear_list_button = ttk.Button(list_controls_frame, text=self.lang.get("clear_list"))
+        self.clear_list_button = ttk.Button(list_controls_frame, text=self.lang.get("clear_list"), style='Compact.TButton')
         self.clear_list_button.pack(side='right', padx=5)
 
         ttk.Label(list_controls_frame, text=self.lang.get("file_list_local")).pack(side='left', padx=(0,10))
@@ -172,12 +178,10 @@ class AppView:
         
         left_col_frame = ttk.Frame(parent_frame)
         left_col_frame.grid(row=0, column=0, sticky='nsew', padx=(5, 10), pady=5)
-
-        naming_frame = ttk.LabelFrame(left_col_frame, text=self.lang.get("naming_rules"))
-        naming_frame.pack(fill='x', expand=True)
         
-        naming_inner_frame = ttk.Frame(naming_frame)
-        naming_inner_frame.pack(padx=10, pady=10, fill='x')
+        naming_inner_frame = ttk.Frame(left_col_frame)
+        naming_inner_frame.pack(padx=10, pady=(10, 5), fill='x')
+        
         options_holder = ttk.Frame(naming_inner_frame)
         options_holder.pack(fill='x')
 
@@ -187,17 +191,30 @@ class AppView:
         ttk.Label(date_format_frame, text=f'{self.lang.get("format")}').pack(side='left')
         self.date_format_entry = ttk.Entry(date_format_frame, textvariable=self.app.date_format_var, width=15)
         self.date_format_entry.pack(side='left', padx=2)
-        ContextMenu(self.date_format_entry) # ★追加
+        ContextMenu(self.date_format_entry)
 
         ttk.Separator(options_holder, orient='vertical').pack(side='left', fill='y', padx=5)
         ttk.Checkbutton(options_holder, text=self.lang.get("delete_original_name"), variable=self.app.remove_original_name_var).pack(side='left', padx=10)
         ttk.Checkbutton(options_holder, text=self.lang.get("add_sequence_number"), variable=self.app.add_sequence_var).pack(side='left', padx=10)
 
-        ai_options_frame = ttk.LabelFrame(left_col_frame, text=self.lang.get("ai_options"))
-        ai_options_frame.pack(fill='x', expand=True, pady=(5, 0))
+        ttk.Separator(options_holder, orient='vertical').pack(side='left', fill='y', padx=5)
+        ttk.Label(options_holder, text=f'{self.lang.get("language_ai")}').pack(side='left')
+        lang_radio_frame = ttk.Frame(options_holder)
+        lang_radio_frame.pack(side='left', padx=(2, 10))
+        ttk.Radiobutton(lang_radio_frame, text=self.lang.get("lang_en"), variable=self.app.language_mode_var, value="English").pack(side='left')
+        ttk.Radiobutton(lang_radio_frame, text=self.lang.get("lang_ja"), variable=self.app.language_mode_var, value="日本語").pack(side='left', padx=2)
 
-        ai_inner_frame = ttk.Frame(ai_options_frame)
-        ai_inner_frame.pack(padx=10, pady=10, fill='x')
+        folder_name_row = ttk.Frame(left_col_frame)
+        folder_name_row.pack(fill='x', padx=10, pady=5)
+
+        ttk.Checkbutton(folder_name_row, text=self.lang.get("add_folder_name"), variable=self.app.add_folder_name_var).pack(side='left')
+        self.folder_name_to_add_entry = ttk.Entry(folder_name_row, textvariable=self.app.folder_name_to_add_var, width=30)
+        self.folder_name_to_add_entry.pack(side='left', padx=(5,0), fill='x', expand=True)
+        ContextMenu(self.folder_name_to_add_entry)
+
+
+        ai_inner_frame = ttk.Frame(left_col_frame)
+        ai_inner_frame.pack(padx=10, pady=(5,10), fill='x')
         
         api_key_outer_frame = ttk.Frame(ai_inner_frame)
         api_key_outer_frame.pack(fill='x')
@@ -207,48 +224,25 @@ class AppView:
             api_key_outer_frame,
             textvariable=self.app.gemini_model_var,
             values=self.app.GEMINI_MODELS,
-            state="readonly"
+            state="readonly",
+            width=25 
         )
-        model_combo.pack(side='left', padx=(0,10), fill='x', expand=True)
+        model_combo.pack(side='left', padx=(0,10))
         
         ttk.Label(api_key_outer_frame, text=self.lang.get("gemini_api_key")).pack(side='left', padx=(0,5))
         
         api_key_entry_frame = ttk.Frame(api_key_outer_frame)
-        api_key_entry_frame.pack(fill='none', expand=False)
+        api_key_entry_frame.pack(fill='x', expand=True) 
         self.gemini_api_key_entry = ttk.Entry(api_key_entry_frame, textvariable=self.app.gemini_api_key_var, width=30, show="*")
-        self.gemini_api_key_entry.pack(side='left')
-        ContextMenu(self.gemini_api_key_entry) # ★追加
+        self.gemini_api_key_entry.pack(side='left', fill='x', expand=True) 
+        ContextMenu(self.gemini_api_key_entry)
         
-        api_key_help = ttk.Label(api_key_entry_frame, text=" (?)", foreground="blue", cursor="hand2")
-        api_key_help.pack(side='left')
-        ToolTip(api_key_help, self.lang.get("api_key_tooltip"))
+        self.api_key_help_label = ttk.Label(api_key_entry_frame, text=" (?)", foreground="blue", cursor="hand2")
+        self.api_key_help_label.pack(side='left')
+        ToolTip(self.api_key_help_label, self.lang.get("api_key_tooltip"))
         
-        other_options_frame = ttk.Frame(ai_inner_frame)
-        other_options_frame.pack(fill='x', pady=(8,0))
 
-        ttk.Label(other_options_frame, text=f'{self.lang.get("language_ai")}').pack(side='left')
-        lang_radio_frame = ttk.Frame(other_options_frame)
-        lang_radio_frame.pack(side='left', padx=(2, 10))
-        ttk.Radiobutton(lang_radio_frame, text=self.lang.get("lang_en"), variable=self.app.language_mode_var, value="English").pack(side='left')
-        ttk.Radiobutton(lang_radio_frame, text=self.lang.get("lang_ja"), variable=self.app.language_mode_var, value="日本語").pack(side='left', padx=2)
-        ttk.Separator(other_options_frame, orient='vertical').pack(side='left', fill='y', padx=5)
-        ttk.Label(other_options_frame, text=f'{self.lang.get("score")}').pack(side='left')
-        self.ai_min_score_entry = ttk.Entry(other_options_frame, textvariable=self.app.ai_min_score_var, width=5)
-        self.ai_min_score_entry.pack(side='left', padx=(2,10))
-        ContextMenu(self.ai_min_score_entry) # ★追加
-        
-        ttk.Separator(other_options_frame, orient='vertical').pack(side='left', fill='y', padx=5)
-        ttk.Label(other_options_frame, text=f'{self.lang.get("max_keywords")}').pack(side='left')
-        self.ai_max_keywords_entry = ttk.Entry(other_options_frame, textvariable=self.app.ai_max_keywords_var, width=5)
-        self.ai_max_keywords_entry.pack(side='left', padx=(2,10))
-        ContextMenu(self.ai_max_keywords_entry) # ★追加
-        
-        ttk.Separator(other_options_frame, orient='vertical').pack(side='left', fill='y', padx=5)
-        ttk.Label(other_options_frame, text=f'{self.lang.get("fallback_name")}').pack(side='left')
-        self.ai_fallback_name_entry = ttk.Entry(other_options_frame, textvariable=self.app.ai_fallback_name_var, width=15)
-        self.ai_fallback_name_entry.pack(side='left', padx=2)
-        ContextMenu(self.ai_fallback_name_entry) # ★追加
-
+        # --- プロンプトセクション ---
         right_col_frame = ttk.Frame(parent_frame)
         right_col_frame.grid(row=0, column=1, sticky='nsew', padx=(0, 5), pady=5)
         right_col_frame.rowconfigure(0, weight=1)
@@ -272,19 +266,22 @@ class AppView:
         text_frame.columnconfigure(0, weight=1)
         self.custom_prompt_text = scrolledtext.ScrolledText(text_frame, wrap=tk.WORD, height=3, width=50, relief='solid', borderwidth=1)
         self.custom_prompt_text.grid(row=0, column=0, sticky='nsew')
-        ContextMenu(self.custom_prompt_text) # ★追加
+        ContextMenu(self.custom_prompt_text)
         ToolTip(self.custom_prompt_text, self.lang.get("prompt_tooltip"))
 
         button_frame = ttk.Frame(prompt_frame)
         button_frame.grid(row=2, column=0, sticky='e', padx=10, pady=(0,5))
         
-        self.prompt_idea_button = ttk.Button(button_frame, text=self.lang.get("prompt_ideas"))
+        self.app.style.configure('CompactPrompt.TButton', padding=(5, 1))
+        self.app.style.configure('AccentCompact.TButton', foreground='white', background='#0078D7', padding=(5, 1))
+
+        self.prompt_idea_button = ttk.Button(button_frame, text=self.lang.get("prompt_ideas"), style='CompactPrompt.TButton')
         self.prompt_idea_button.pack(side='left', padx=(0, 5))
 
-        self.delete_prompt_button = ttk.Button(button_frame, text=self.lang.get("delete_selected_prompt"))
+        self.delete_prompt_button = ttk.Button(button_frame, text=self.lang.get("delete_selected_prompt"), style='CompactPrompt.TButton')
         self.delete_prompt_button.pack(side='left', padx=(0, 5))
         
-        self.add_prompt_button = ttk.Button(button_frame, text=self.lang.get("add_update_prompt"))
+        self.add_prompt_button = ttk.Button(button_frame, text=self.lang.get("add_update_prompt"), style='AccentCompact.TButton')
         self.add_prompt_button.pack(side='left')
 
     def update_prompt_templates_list(self):

@@ -1,148 +1,100 @@
 # ==============================================================================
-# file: google_drive_handler.py (AI処理・速度改善版)
+# file: google_drive_handler.py (プロンプト最終修正版)
 # ==============================================================================
-import os
-import io
 import re
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload
-from dotenv import load_dotenv
+import io
 import google.generativeai as genai
+from google.api_core import exceptions
 from PIL import Image
 
-load_dotenv() 
-SCOPES = ['https://www.googleapis.com/auth/drive']
-
-class GoogleDriveHandler:
-    # (このクラスは今回変更ありません)
-    def __init__(self):
-        self.creds = self._authenticate_google_drive()
-        if self.creds:
-            self.service = build('drive', 'v3', credentials=self.creds)
-        else:
-            self.service = None
-            print("Google Driveサービスの初期化に失敗しました。認証情報を確認してください。")
-
-    def _authenticate_google_drive(self):
-        creds = None
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                except Exception as e:
-                    print(f"トークンのリフレッシュに失敗しました: {e}")
-                    creds = None
-            if not creds:
-                client_secrets_file = os.getenv('GOOGLE_CLIENT_SECRET_FILE', 'credentials.json')
-                if not os.path.exists(client_secrets_file):
-                    print(f"エラー: {client_secrets_file} が見つかりません。")
-                    return None
-                flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, SCOPES)
-                creds = flow.run_local_server(port=0)
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
-        return creds
-    
-    def list_files(self, page_size=10, query=None):
-        if not self.service: return []
-        try:
-            results = self.service.files().list(pageSize=page_size, fields="nextPageToken, files(id, name, mimeType, createdTime)", q=query).execute()
-            return results.get('files', [])
-        except HttpError as error:
-            print(f'Google Drive ファイル一覧取得エラー: {error}'); return []
-    def rename_file(self, file_id, new_name):
-        if not self.service: return False
-        try:
-            self.service.files().update(fileId=file_id, body={'name': new_name}, fields='name').execute(); return True
-        except HttpError as error:
-            print(f'Google Drive リネームエラー: {error}'); return False
-    def download_file(self, file_id):
-        if not self.service: return None
-        try:
-            request = self.service.files().get_media(fileId=file_id)
-            file_content = io.BytesIO()
-            downloader = MediaIoBaseDownload(file_content, request)
-            done = False
-            while not done: _, done = downloader.next_chunk()
-            return file_content.getvalue()
-        except HttpError as error:
-            print(f"Google Drive ダウンロードエラー: {error}"); return None
-
 class GoogleAIApiHandler:
-    def __init__(self, gemini_api_key=None, model_name='gemini-1.5-flash-latest'):
+    def __init__(self, gemini_api_key, model_name="gemini-2.0-flash-lite"):
+        self.api_key = gemini_api_key
         self.model_name = model_name
         self.generative_model = None
-        
-        self.vision_client = None 
-        self.language_client = None
+        self._configure_api()
 
-        if not gemini_api_key:
-            print("Gemini APIキーが提供されていないため、クライアントを初期化しませんでした。")
-            return
-
+    def _configure_api(self):
         try:
-            genai.configure(api_key=gemini_api_key)
+            genai.configure(api_key=self.api_key)
             self.generative_model = genai.GenerativeModel(self.model_name)
-            print(f"Gemini API クライアント ({self.model_name}) を初期化しました。")
         except Exception as e:
-            print(f"Gemini API クライアント ({self.model_name}) の初期化に失敗: {e}")
-            self.generative_model = None
+            print(f"Error configuring Google AI API: {e}")
 
-    def generate_name_from_image(self, image_bytes, user_prompt, language_mode):
-        """
-        画像データとプロンプトから直接ファイル名を生成する。
-        """
+    def generate_name_from_image(self, image_bytes, custom_prompt, language_mode):
         if not self.generative_model:
-            return "生成AI未初期化", False
+            return "API not configured", False, 0
+        
+        prompt = self._build_prompt(custom_prompt, language_mode)
         
         try:
             img = Image.open(io.BytesIO(image_bytes))
-
-            # プロンプトを組み立てる
-            if language_mode == "日本語":
-                final_prompt = f"""
-                あなたはファイル名を提案する専門家です。
-                この画像の内容を分析し、ユーザーの指示に沿って、最も的確なファイル名を1つだけ生成してください。
-
-                # ユーザーからの指示
-                {user_prompt}
-
-                # ファイル名のルール
-                - 必ず日本語で回答してください。
-                - スペースはアンダースコア(_)に置き換えてください。
-                - 拡張子や余計な説明は一切含めず、ファイル名だけを返答してください。
-                """
-            else: # English
-                final_prompt = f"""
-                You are an expert in suggesting file names.
-                Analyze the content of this image and generate the single most appropriate filename based on the user's instructions.
-
-                # User Instructions
-                {user_prompt}
-
-                # Filename Rules
-                - You must answer in English.
-                - Replace spaces with underscores (_).
-                - Do not include file extensions or any extra descriptions; return only the filename.
-                """
-
             print(f"Gemini APIに画像とプロンプトを送信中...")
-            response = self.generative_model.generate_content([final_prompt, img])
+            response = self.generative_model.generate_content([prompt, img])
             
-            generated_name = response.text.strip()
-            generated_name = re.sub(r"```(python|text|json|)\n|```", "", generated_name)
-            generated_name = generated_name.replace(" ", "_").replace("　", "_").replace("\n", "")
-            
-            print(f"Geminiからの提案名: {generated_name}")
-            return generated_name, True
+            if response.parts:
+                generated_text = response.text.strip()
+                # レスポンスのクリーニング処理を強化
+                generated_text = re.sub(r"```(python|text|json|)\n|```", "", generated_text)
+                generated_text = generated_text.replace(" ", "_").replace("　", "_").replace("\n", "_")
 
+                # 万が一、モデルがまだ余計なことを言ってきた場合への対策
+                lines = generated_text.split('_')
+                if len(lines) > 1 and ("提案します" in lines[0] or "suggest" in lines[0].lower()):
+                    generated_text = "_".join(lines[1:])
+
+                tokens_used = 0
+                if hasattr(response, 'usage_metadata') and hasattr(response.usage_metadata, 'total_token_count'):
+                    tokens_used = response.usage_metadata.total_token_count
+                
+                print(f"Geminiからの提案名: {generated_text}")
+                return generated_text, True, tokens_used
+            else:
+                return "No content generated", False, 0
+        except exceptions.ResourceExhausted as e:
+            print(f"Quota exceeded for model {self.model_name}: {e}")
+            return "QUOTA_EXCEEDED", False, 0
         except Exception as e:
-            error_message = f"Gemini API ({self.model_name}) の呼び出し中にエラーが発生しました: {e}"
-            print(error_message)
-            return "APIエラー", False
+            print(f"Error during API call: {e}")
+            return f"API_ERROR: {e}", False, 0
+
+    def _build_prompt(self, custom_prompt, language_mode):
+        # ★修正: AIへの指示をより厳密で、具体的な例を示す形式に変更
+        if language_mode == "日本語":
+            return f"""
+            あなたはファイル名の提案の専門家です。
+            この画像の内容を分析し、ユーザーの指示に基づいて最適なファイル名を1つだけ生成してください。
+
+            # ユーザーの指示:
+            {custom_prompt}
+
+            # 厳格な出力ルール:
+            - 日本語で、アンダースコア(_)区切りの単一のファイル名のみを出力してください。
+            - 説明、前置き、言い訳、記号、拡張子は絶対に含めないでください。
+            - 良い出力例: `夏の縁側で涼む女子高生`
+            - 悪い出力例: `キーワードがないので提案します: 夏の縁側で涼む女子高生.png`
+            - 最終的な出力は、ファイル名として使える文字列1つだけです。
+            """
+        else: # English
+            return f"""
+            You are an expert in suggesting file names. Analyze the content of this image and generate the single most appropriate filename based on the user's instructions.
+
+            # User Instructions:
+            {custom_prompt}
+
+            # Strict Output Rules:
+            - Respond in English with a single filename, using underscores (_) as separators.
+            - Absolutely do not include any descriptions, preambles, excuses, symbols, or file extensions.
+            - Good output example: `high_school_girls_relaxing_on_summer_veranda`
+            - Bad output example: `Since no keywords were provided, I will suggest: high_school_girls_relaxing_on_summer_veranda.png`
+            - The final output must be only a single string usable as a filename.
+            """
+
+class GoogleDriveHandler:
+    def __init__(self, credentials_path=None):
+        # This is a placeholder for Google Drive functionality
+        print("Google Drive Handler Initialized (Placeholder)")
+
+    def list_files(self):
+        # Placeholder for listing files
+        return []
