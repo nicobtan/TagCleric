@@ -1,11 +1,11 @@
 ; ===================================================================
-; Inno Setup Script for TagCleric v1.1.0
+; Inno Setup Script for TagCleric v1.1.1
 ; ===================================================================
 
 [Setup]
 ; アプリケーションの基本情報
 AppName=TagCleric
-AppVersion=1.1.0
+AppVersion=1.1.1
 AppPublisher=EL bereth
 AppPublisherURL=https://github.com/nicobtan/TagCleric
 AppSupportURL=https://portfoliopage-25077.web.app/#/tagcleric
@@ -15,7 +15,7 @@ DefaultDirName={autopf}\TagCleric
 DefaultGroupName=TagCleric
 DisableProgramGroupPage=yes
 LicenseFile=EULA.txt
-OutputBaseFilename=TagCleric_v1.1.0_setup
+OutputBaseFilename=TagCleric_v1.1.1_setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

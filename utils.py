@@ -6,6 +6,14 @@ from tkinter import ttk, scrolledtext
 import os
 import sys
 from PIL import Image, ImageTk
+
+def compare_versions(v1, v2):
+    parts1 = list(map(int, v1.split('.')))
+    parts2 = list(map(int, v2.split('.')))
+    for p1, p2 in zip(parts1, parts2):
+        if p1 > p2: return True
+        if p1 < p2: return False
+    return len(parts1) > len(parts2)
 # from moviepy.editor import VideoFileClip # <- 起動時のインポートを削除
 
 def resource_path(relative_path):

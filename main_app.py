@@ -1,5 +1,5 @@
 # ==============================================================================
-# file: main_app.py (プロンプト・モデル定義更新版)
+# file: main_app.py (v1.1.1)
 # ==============================================================================
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font, scrolledtext, simpledialog
@@ -22,7 +22,7 @@ import shutil
 from language_manager import LanguageManager
 from google_drive_handler import GoogleDriveHandler, GoogleAIApiHandler
 from file_system_handler import FileSystemHandler
-from utils import resource_path, get_config_dir
+from utils import resource_path, get_config_dir, compare_versions
 
 import app_view
 import app_logic
@@ -111,8 +111,9 @@ class TextRedirector:
     def flush(self): pass
 
 class FileRenamerApp(TkinterDnD.Tk):
-    CURRENT_VERSION = "1.1.0" 
-    CURRENT_PROMPTS_VERSION = "1.1.0"
+    CURRENT_VERSION = "1.1.1" 
+    CURRENT_PROMPTS_VERSION = "1.1.1"
+    UPDATE_INFO_URL = "https://gist.githubusercontent.com/nicobtan/724c59750c93cf7a296117e345a2f0c5/raw/version.json"
 
     def __init__(self):
         super().__init__()
@@ -176,7 +177,7 @@ class FileRenamerApp(TkinterDnD.Tk):
             'PromptsVersion': '' 
         }
         config['Links'] = {
-            'UpdateInfoURL': "https://gist.githubusercontent.com/nicobtan/724c59750c93cf7a296117e345a2f0c5/raw/version.json",
+            'UpdateInfoURL': self.UPDATE_INFO_URL,
             'DonationURL': "https://portfoliopage-25077.web.app/donation.html",
             'PromptIdeaURL': "https://note.com/mate_inc/n/n31b96d35a5c6",
             'AboutURL': "https://github.com/nicobtan/TagCleric",
@@ -198,7 +199,7 @@ class FileRenamerApp(TkinterDnD.Tk):
 
         prompts_file_exists = os.path.exists(self.prompts_filepath)
 
-        if not prompts_file_exists or prompts_version_in_config < self.CURRENT_PROMPTS_VERSION:
+        if not prompts_file_exists or compare_versions(self.CURRENT_PROMPTS_VERSION, prompts_version_in_config):
             try:
                 default_prompt_path = resource_path("rename_prompts.txt")
                 if os.path.exists(default_prompt_path):
@@ -266,6 +267,9 @@ class FileRenamerApp(TkinterDnD.Tk):
             sys.stderr = TextRedirector(self.app_view.log_viewer, "stderr")
             self.app_view.log_viewer.tag_config("stderr", foreground="red")
             self.app_view.log_viewer.tag_config("error", foreground="red")
+            
+            if hasattr(self.lang_manager, 'get_load_status'):
+                print(self.lang_manager.get_load_status())
 
         self.app_view.update_prompt_templates_list()
         self.on_template_selected()
@@ -286,9 +290,8 @@ class FileRenamerApp(TkinterDnD.Tk):
         file_menu.add_command(label=self.lang_manager.get("exit_menu"), command=self.on_closing)
 
     def switch_language(self, lang_code):
-        if self.lang_manager.language_code == lang_code: return
-        self.save_language_setting(lang_code)
-        messagebox.showinfo(self.lang_manager.get("lang_change_title"), self.lang_manager.get("lang_change_manual_restart_message"))
+        if self.lang_manager.language_code != lang_code:
+            messagebox.showinfo(self.lang_manager.get("lang_change_title"), self.lang_manager.get("lang_change_manual_restart_message"))
     
     def init_ai_handler(self):
         try:
@@ -298,8 +301,8 @@ class FileRenamerApp(TkinterDnD.Tk):
 
     def setup_variables(self):
         self.THUMBNAIL_SIZE = (160, 160)
-        self.GEMINI_MODELS = [ "gemini-2.0-flash-lite", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest", "gemini-pro" ]
-        self.GEMINI_LIMITS = { "gemini-2.0-flash-lite": 200, "gemini-1.5-flash-latest": 200, "gemini-1.5-pro-latest": 20, "gemini-pro": 100 }
+        self.GEMINI_MODELS = [ "gemini-2.5-flash-lite", "gemini-2.0-flash-lite","gemini-1.5-flash-latest", "gemini-1.5-pro-latest", "gemini-pro" ]
+        self.GEMINI_LIMITS = { "gemini-2.5-flash-lite": 200, "gemini-2.0-flash-lite": 200,"gemini-1.5-flash-latest": 200, "gemini-1.5-pro-latest": 20, "gemini-pro": 100 }
         self.gemini_model_var = tk.StringVar(value=self.GEMINI_MODELS[0])
         self.add_date_var = tk.BooleanVar(value=True)
         self.date_format_var = tk.StringVar(value="%Y%m%d")
@@ -378,7 +381,7 @@ class FileRenamerApp(TkinterDnD.Tk):
         if not config.has_section('Settings'): config.add_section('Settings')
         config.set('Settings', 'GeminiApiKey', self.gemini_api_key_var.get())
         config.set('Settings', 'GeminiModel', self.gemini_model_var.get())
-        config.set('Settings', 'Language', self.lang_manager.language_code)
+        config.set('Settings', 'Language', self.selected_language_var.get())
         config.set('Settings', 'PromptsVersion', self.CURRENT_PROMPTS_VERSION)
         
         if not config.has_section('TokenUsage'): config.add_section('TokenUsage')
@@ -555,7 +558,7 @@ class FileRenamerApp(TkinterDnD.Tk):
             with urllib.request.urlopen(self.UPDATE_INFO_URL, timeout=10) as response: data = json.load(response)
             latest_version = data.get("latest_version")
             download_url = data.get("download_url")
-            if latest_version and latest_version > self.CURRENT_VERSION:
+            if latest_version and compare_versions(latest_version, self.CURRENT_VERSION):
                 if messagebox.askyesno(self.lang_manager.get("update_available_title"), self.lang_manager.get("update_available_message").format(version=latest_version)):
                     webbrowser.open(download_url)
             elif not silent:
@@ -569,7 +572,9 @@ class FileRenamerApp(TkinterDnD.Tk):
             if not silent:
                 messagebox.showerror(self.lang_manager.get("error_title"), error_message)
                 self.after(0, self.update_status, self.lang_manager.get("status_update_check_failed"))
+
     
+
     def show_quota_error_message(self, model_name):
          messagebox.showerror(self.lang_manager.get("quota_error_title"), self.lang_manager.get("quota_error_message").format(model_name=model_name))
 
